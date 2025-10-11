@@ -273,6 +273,7 @@
     row.style.display = 'flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.marginTop='8px';
     for(let i=0;i<RULE_SEQUENCE.length;i++){
       const lvl = RULE_SEQUENCE[i];
+      
       const card = document.createElement('div');
       card.style.display='flex'; card.style.flexDirection='column'; card.style.alignItems='center';
       card.style.width='48px'; card.style.padding='6px'; card.style.borderRadius='8px';
