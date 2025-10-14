@@ -4,58 +4,40 @@
   <meta charset="utf-8" />
   <title>Suika — Physics Prototype</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    :root{
-      --bg:#f6f7fb; --panel:#ffffff; --muted:#98a0ad;
-      --accent:#ff6b6b;
-    }
-    html,body{height:100%;margin:0;background:var(--bg);font-family:Inter,system-ui,Arial;}
-    #topbar{position:fixed;left:12px;right:12px;top:12px;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:12px}
-    .left-controls{display:flex;gap:8px}
-    .btn{background:var(--panel);border-radius:10px;padding:8px 12px;border:1px solid rgba(0,0,0,0.06);cursor:pointer;box-shadow:0 6px 18px rgba(30,30,30,0.04)}
-    #scorePanel{background:rgba(255,255,255,0.96);padding:10px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.06);text-align:right}
-    #credit{position:fixed;left:12px;bottom:10px;font-size:12px;color:#666;z-index:60}
-
-    /* right flowchart panel */
-    #flowPanel{position:fixed;right:12px;top:90px;width:260px;bottom:12px;background:rgba(255,255,255,0.98);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,0.06);padding:12px;overflow:auto;z-index:60}
-    #flowPanel h4{margin:2px 0 8px 0;font-size:14px}
-    .flowItem{padding:8px;border-radius:8px;background:#fbfcfd;margin-bottom:8px;border:1px solid rgba(0,0,0,0.04);font-size:13px;color:#333}
-    .flowSmall{font-size:12px;color:var(--muted);margin-top:4px}
-
-    /* canvas area sits below; we let p5 place the canvas */
-    #overlayStart, #overlayGameOver {
-      position:fixed; left:0; right:0; top:0; bottom:0; z-index:200; display:flex; align-items:center; justify-content:center;
-      background: rgba(12,14,20,0.45); backdrop-filter: blur(4px);
-    }
-    .card{background:var(--panel); padding:28px 32px; border-radius:14px; box-shadow: 0 24px 60px rgba(0,0,0,0.18); text-align:center; width:420px}
-    .title{font-size:28px;margin-bottom:6px}
-    .subtitle{font-size:13px;color:var(--muted);margin-bottom:18px}
-    .bigBtn{padding:12px 16px;border-radius:10px;background:linear-gradient(180deg,#ff8a8a,#ff5b5b);color:#fff;border:none;font-weight:700;cursor:pointer}
-
-    /* responsive adjustments */
-    @media(max-width:920px){
-      #flowPanel{display:none}
-    }
-  </style>
-
+  <link rel="stylesheet" href="suika-style.css">
   <!-- libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 </head>
 <body>
+  <!-- Top bar -->
   <div id="topbar">
     <div class="left-controls">
       <button id="btnReset" class="btn">New Game</button>
-      <button id="btnClear" class="btn">Clear Fruits</button>
-      <div style="align-self:center;color:var(--muted);font-size:13px;margin-left:8px">Click top area to drop</div>
+      <button id="btnClear" class="btn disabled" data-locked="true">Clear Small</button>
+      <div class="hint">Tap inside box to drop</div>
     </div>
+
     <div id="scorePanel">
-      <div style="font-size:12px;color:var(--muted)">Score</div>
-      <div id="score" style="font-weight:700;font-size:20px">0</div>
-      <div style="font-size:12px;color:var(--muted)">High: <span id="high">0</span></div>
+      <div class="label">Score</div>
+      <div id="score" class="scoreVal">0</div>
+      <div class="label muted">High: <span id="high">0</span></div>
     </div>
   </div>
 
+  <!-- Merge ring (left of board) -->
+  <div id="mergeRing" aria-hidden="true"></div>
+
+  <!-- Next preview (top-right) -->
+  <div id="nextPreview" aria-hidden="true">?</div>
+
+  <!-- Mobile controls (shown only on narrow screens) -->
+  <div id="mobileControls" aria-hidden="true">
+    <button id="mobileDrop" class="btn big">Drop</button>
+    <button id="mobileNew" class="btn big">New</button>
+  </div>
+
+  <!-- Flow / merge chronology -->
   <div id="flowPanel" aria-live="polite">
     <h4>Merge chronology</h4>
     <div id="flowList"><div class="flowSmall">No merges yet — play to see events.</div></div>
@@ -69,7 +51,7 @@
       <div class="title">Suika — Physics Prototype</div>
       <div class="subtitle">Drop fruits, merge same fruits to level up. Keep the bowl from overflowing!</div>
       <button id="startBtn" class="bigBtn">Start Game</button>
-      <div style="margin-top:12px;font-size:13px;color:var(--muted)">Tip: you can use <strong>Space</strong> to drop at center</div>
+      <div class="tip">Tip: press <strong>Space</strong> to drop in center</div>
     </div>
   </div>
 
@@ -82,7 +64,7 @@
     </div>
   </div>
 
-  <!-- game logic (separate file) -->
+  <!-- game logic -->
   <script src="suika-physics.js"></script>
 </body>
 </html>
