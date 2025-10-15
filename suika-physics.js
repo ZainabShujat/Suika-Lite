@@ -21,7 +21,7 @@
 
   // Fruit sizing (fraction of board width)
   // Level 1 radius fraction of boardW
-  const RADIUS_BASE_FRAC = 0.02; // level1 radius = boardW * 0.06
+  const RADIUS_BASE_FRAC = 0.04; // level1 radius = boardW * 0.06
   const RADIUS_GROWTH = 1.47;    // per-level growth multiplier
   const MAX_RADIUS_FRAC = 0.30;  // clamp so fruit never bigger than this fraction of boardW
 
