@@ -24,11 +24,11 @@
   // Fruit sizing (fraction of board width)
   // Level 1 radius fraction of boardW; everything scales with boardW for responsive layout
   const RADIUS_BASE_FRAC = 0.02; // level1 radius = 5% of boardW
-  const RADIUS_GROWTH = 1.45;    // per-level growth multiplier
+  const RADIUS_GROWTH = 1.43;    // per-level growth multiplier
   const MAX_RADIUS_FRAC = 0.33;  // clamp so fruit never bigger than this fraction of boardW
 
   // Merge and collision tuning
-  const MERGE_MIN_DIST = 1; // use sum of radii * this -> nearly exact contact for merge checks
+  const MERGE_MIN_DIST = 1.2; // use sum of radii * this -> nearly exact contact for merge checks
   const SPAWN_DEBOUNCE = 200;
   const SPAWN_GRACE_MS = 900;
   const CLEAR_UNLOCK_SCORE = 500;
