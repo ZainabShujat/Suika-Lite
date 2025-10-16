@@ -1,8 +1,8 @@
 # 🍉 Suika — Physics Prototype
 *A web-based fruit merge sandbox built by Zainab*
-[Live at] (https://zainabshujat.github.io/suika-lite)
+[Live at this site](https://zainabshujat.github.io/suika-lite)
 
-![Gameplay Screenshot](assets/suika_preview.png)  
+![Gameplay Screenshot](assets/1.png)  
 *(Best experienced on desktop. Mobile version in progress!)*  
 
 ---
