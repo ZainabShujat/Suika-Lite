@@ -65,7 +65,7 @@ The next project, **Suika+**, will expand this with:
 ---
 
 ## 🪄 Credits
-**Built & designed by Zee**  
+**Built & designed by Zainab**  
 Sprites, physics tuning, and UI layout all hand-crafted 🍑  
 
 > p5.js and Matter.js are open-source libraries.  
