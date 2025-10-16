@@ -771,6 +771,8 @@
   }
 
   function draw(){
+    if(gameOver) 
+      return;
     background(242,248,252);
     Engine.update(engine, 1000/60);
 
