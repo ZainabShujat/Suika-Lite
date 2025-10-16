@@ -1,12 +1,13 @@
-/* suika-physics.js — full updated file
-   - Scoring helper centralized & tuned (classic/tight/generous presets)
-   - Fruit radii computed as percentage of board width (responsive)
-   - Dynamic gravity, spin clamping, increased inertia for big fruits
-   - Next-preview deterministic (spawn consumes nextPick then immediately refill)
-   - Client->canvas coordinate mapping + resize scaling to avoid zoom cheats
-   - Achievement popups for Level 8 ("Almost there") and Level 9 ("WATERMELON")
-   - Slight UI improvements: chain shout, float pops, charge UI updates (inline styles where needed)
-   - Keep previous mechanics: ClearSmall (level <=2), merge scheduling, supernova easter
+/* suika-physics.js — updated full file
+   - Responsive fruit sizes (percentage of board)
+   - Snug collisions and density/inertia tuning
+   - Spin clamping and damping for larger fruits
+   - Suika-like scoring table (tighter)
+   - Deterministic preview (weighted up to SPAWN_MAX_LEVEL)
+   - Landing overlay / onboarding tutorial
+   - Achievements & chain shoutouts
+   - Clear Small alt-charge UI logic
+   - Game over & Fruit Supernova end conditions
 */
 
 (() => {
@@ -17,25 +18,31 @@
   // -------------------------
   const MAX_LEVEL = 9;
   const SPAWN_MAX_LEVEL = 4;
-  const SPAWN_WEIGHTS = [0.40, 0.32, 0.18, 0.10];
+  // Weighted probabilities for spawn levels 1..4 (should sum to ~1)
+  const SPAWN_WEIGHTS = [0.44, 0.30, 0.18, 0.08];
 
   // Fruit sizing (fraction of board width)
-  // Level 1 radius fraction of boardW
-  const RADIUS_BASE_FRAC = 0.04; // level1 radius = boardW * 0.06
-  const RADIUS_GROWTH = 1.47;    // per-level growth multiplier
-  const MAX_RADIUS_FRAC = 0.30;  // clamp so fruit never bigger than this fraction of boardW
+  // Level 1 radius fraction of boardW; everything scales with boardW for responsive layout
+  const RADIUS_BASE_FRAC = 0.02; // level1 radius = 5% of boardW
+  const RADIUS_GROWTH = 1.45;    // per-level growth multiplier
+  const MAX_RADIUS_FRAC = 0.34;  // clamp so fruit never bigger than this fraction of boardW
 
-  const MERGE_MIN_DIST = 1.0; // exact contact (sum of radii)
+  // Merge and collision tuning
+  const MERGE_MIN_DIST = 1.4; // use sum of radii * this -> nearly exact contact for merge checks
   const SPAWN_DEBOUNCE = 200;
   const SPAWN_GRACE_MS = 900;
   const CLEAR_UNLOCK_SCORE = 500;
   const CLEAR_RECHARGE_POINTS = 300;
 
-  // Visual tuning
-  const VISUAL_DIAMETER_FACTOR = 1.02; // draw slightly larger to hide solver gaps
+  // Visual draw scaling (draw radius = r * 2 * VISUAL_DIAMETER_FACTOR)
+  const VISUAL_DIAMETER_FACTOR = 1.02;
 
-  // scoring preset: 'classic', 'tight', 'generous'
-  const SCORE_PRESET = 'classic';
+  // Scoring: Suika-ish table (tight)
+  // index = level, value = points for merging into this level
+  const POINTS_PER_LEVEL = [0, 1, 3, 6, 10, 15, 21, 28, 36, 45];
+
+  // chain multiplier per extra merge in chain (small)
+  const CHAIN_MULTIPLIER_PER = 0.13; // chain growth reasonable
 
   // -------------------------
   // RUNTIME STATE
@@ -73,12 +80,13 @@
   let particles = [];
 
   // -------------------------
-  // Utilities
+  // UTILITIES
   // -------------------------
   function el(id){ return document.getElementById(id); }
 
   function computeBoardRect(){
     const isMobile = window.innerWidth < 760;
+    // boardW should not exceed viewport height (square-ish)
     const boardW = Math.min(window.innerWidth * (isMobile ? 0.94 : 0.78), window.innerHeight * 0.78);
     const boardX = (window.innerWidth - boardW) / 2;
     const boardY = (window.innerHeight - boardW) / 2;
@@ -91,6 +99,7 @@
     const { boardW } = computeBoardRect();
     const raw = boardW * RADIUS_BASE_FRAC * Math.pow(RADIUS_GROWTH, lvl - 1);
     const clamped = Math.min(raw, boardW * MAX_RADIUS_FRAC);
+    // round to integer pixels for the physics engine
     return Math.round(Math.max(4, clamped));
   }
 
@@ -161,9 +170,9 @@
       return;
     }
     const highestLevel = Math.max(...levels);
-    const gravityBase = 0.9;
-    const gravityGainPerLevel = 0.06;
-    const gravityCap = 1.9;
+    const gravityBase = 1.35;
+    const gravityGainPerLevel = 0.08;
+    const gravityCap = 2.0;
     const proposed = gravityBase + gravityGainPerLevel * (highestLevel - 1);
     const newG = Number.isFinite(proposed) ? Math.min(proposed, gravityCap) : world.gravity.y;
     if(!Number.isFinite(newG) || newG <= 0 || newG > 10) return;
@@ -173,34 +182,31 @@
   function clampSpinForFruit(b){
     if(!b || !b._fruit || b.isStatic) return;
     const level = Math.max(1, Math.floor(b._fruit.level || 1));
-    const maxSpin = Math.max(0.002, 0.02 - 0.0025 * level);
+    // bigger fruits spin less
+    const maxSpin = Math.max(0.0015, 0.036 - 0.0038 * level);
     const current = (b.angularVelocity || 0);
     if(Math.abs(current) > maxSpin){
       Body.setAngularVelocity(b, Math.sign(current) * maxSpin);
     } else {
-      if(level >= 6){
-        const damping = 0.94;
+      // apply damping for larger fruits
+      if(level >= 5){
+        const damping = 0.80;
         Body.setAngularVelocity(b, current * damping);
       }
     }
   }
 
   // -------------------------
-  // Scoring helper
+  // Scoring helper (table-based)
   // -------------------------
   function scoreForMerge(level, chainCount=1){
-    let base = 8;
-    let chainPower = 0.12;
-    if(SCORE_PRESET === 'tight'){ base = 6; chainPower = 0.08; }
-    else if(SCORE_PRESET === 'generous'){ base = 12; chainPower = 0.18; }
-    const levelPts = Math.round(base * Math.pow(2, Math.max(0, level - 1)));
-    const chainMultiplier = 1 + Math.min(0.6, chainPower * Math.max(0, chainCount - 1));
-    const pts = Math.round(levelPts * chainMultiplier);
-    return Math.max(1, Math.min(999999, pts));
+    const base = POINTS_PER_LEVEL[Math.max(1, Math.min(level, MAX_LEVEL))] || 1;
+    const chainMul = 1 + Math.min(0.6, CHAIN_MULTIPLIER_PER * Math.max(0, chainCount - 1));
+    return Math.round(base * chainMul);
   }
 
   // -------------------------
-  // Bounds & spawn picks
+  // Bounds, spawn weights, preview
   // -------------------------
   function createBounds(){
     try{
@@ -209,7 +215,7 @@
       if(rightWall) World.remove(world, rightWall);
     }catch(e){}
     const { boardW, boardX, boardY } = computeBoardRect();
-    const thickness = Math.max(120, boardW*0.14);
+    const thickness = Math.max(120, boardW*0.12);
     ground = Bodies.rectangle(boardX + boardW/2, boardY + boardW + thickness/2, boardW + thickness*2, thickness, { isStatic:true, restitution:0.02, friction:0.92 });
     leftWall = Bodies.rectangle(boardX - thickness/2, boardY + boardW/2, thickness, boardW + thickness*2, { isStatic:true, restitution:0.02, friction:0.92 });
     rightWall = Bodies.rectangle(boardX + boardW + thickness/2, boardY + boardW/2, thickness, boardW + thickness*2, { isStatic:true, restitution:0.02, friction:0.92 });
@@ -226,14 +232,16 @@
     if(!b || !b.position || !b._fruit) return;
     const { boardW, boardX, boardY } = computeBoardRect();
     const topLineY = boardY + 8;
-    const leftBound = boardX + 16 + b._fruit.radius;
-    const rightBound = boardX + boardW - 16 - b._fruit.radius;
+    // clamp horizontally
+    const leftBound = boardX + 12 + b._fruit.radius;
+    const rightBound = boardX + boardW - 12 - b._fruit.radius;
     if(b.position.x < leftBound) Body.setPosition(b, { x: leftBound, y: b.position.y });
     if(b.position.x > rightBound) Body.setPosition(b, { x: rightBound, y: b.position.y });
+    // clamp top so fruit cannot leak above the top line
     const topOfFruit = b.position.y - b._fruit.radius;
     if(topOfFruit < topLineY + 2){
       Body.setPosition(b, { x: b.position.x, y: topLineY + 2 + b._fruit.radius });
-      Body.setVelocity(b, { x: b.velocity.x * 0.3, y: Math.max(0.1, b.velocity.y * 0.2) });
+      Body.setVelocity(b, { x: (b.velocity && b.velocity.x) ? b.velocity.x * 0.25 : 0, y: Math.max(0.1, (b.velocity && b.velocity.y) ? b.velocity.y * 0.2 : 0.1) });
     }
   }
 
@@ -242,20 +250,21 @@
   // -------------------------
   function createFruitAt(level, x, y){
     const r = radiusForLevel(level);
-    // density proportional to area
-    const areaScale = (r * r) / Math.max(1, Math.round((computeBoardRect().boardW * RADIUS_BASE_FRAC) ** 2));
-    const baseDensity = 0.0018;
-    const density = baseDensity * Math.max(1.0, areaScale * 1.12);
-    const options = { restitution: 0.02, friction: 0.98, frictionAir: 0.06, density: density, label: 'fruit' };
+    // density proportional to area (heavier for bigger fruits)
+    const baseDensity = 0.0022;
+    const areaScale = Math.max(1, (r * r) / Math.max(1, Math.round((computeBoardRect().boardW * RADIUS_BASE_FRAC) ** 2)));
+    const density = baseDensity * (1 + (areaScale - 1) * 0.9);
+    const options = { restitution: 0.01, friction: 0.96, frictionAir: 0.04, density: density, label: 'fruit' };
     const b = Bodies.circle(x, y, r, options);
-    const inertiaScale = 90;
+    // increase inertia for larger fruits so they rotate less for same force
+    const inertiaScale = 100;
     const inertia = (r * r) * inertiaScale;
     try { Body.setInertia(b, inertia); } catch(e){}
     b._fruit = { level, radius: r, wobble: 0 };
     World.add(world, b);
     bodies.push(b);
-    Body.setVelocity(b, { x: (Math.random()-0.5)*0.04, y: -0.15 + Math.random()*0.22 });
-    Body.setAngularVelocity(b, (Math.random()-0.5)*0.005);
+    Body.setVelocity(b, { x: (Math.random()-0.5)*0.03, y: -0.12 + Math.random()*0.20 });
+    Body.setAngularVelocity(b, (Math.random()-0.5)*0.004);
     clampSpinForFruit(b);
     b._spawnTime = millis();
     clampBodyInsideBoard(b);
@@ -269,37 +278,39 @@
     const pad = 18;
     const spawnX = (typeof screenX === 'number') ? constrain(screenX, boardX + pad, boardX + boardW - pad) : boardX + boardW/2;
 
-    // determine spawnLevel and immediately refill preview
+    // determine spawnLevel
     let spawnLevel;
     if(forcedLevel){
       spawnLevel = Math.min(forcedLevel, MAX_LEVEL);
     } else {
+      // if there is a nextPick pick it; if null pick weighted
       spawnLevel = Math.min(nextPick || weightedPick(), SPAWN_MAX_LEVEL);
-      // refill preview so the UI shows incoming fruit
+      // refresh preview AFTER we decide spawnLevel to keep preview = upcoming fruit
       generateNextPick();
     }
 
     const r = radiusForLevel(spawnLevel);
     const spawnY = boardY + r + 6;
 
-    // create
-    const areaScale = (r * r) / Math.max(1, Math.round((computeBoardRect().boardW * RADIUS_BASE_FRAC) ** 2));
-    const baseDensity = 0.0018;
-    const density = baseDensity * Math.max(1.0, areaScale * 1.12);
-    const options = { restitution: 0.02, friction: 0.98, frictionAir: 0.06, density: density, label: 'fruit' };
+    // create the body (similar to createFruitAt)
+    const baseDensity = 0.0022;
+    const areaScale = Math.max(1, (r * r) / Math.max(1, Math.round((computeBoardRect().boardW * RADIUS_BASE_FRAC) ** 2)));
+    const density = baseDensity * (1 + (areaScale - 1) * 0.9);
+    const options = { restitution: 0.01, friction: 0.96, frictionAir: 0.04, density: density, label: 'fruit' };
     const b = Bodies.circle(spawnX, spawnY, r, options);
-    const inertiaScale = 90;
+    const inertiaScale = 100;
     const inertia = (r * r) * inertiaScale;
     try { Body.setInertia(b, inertia); } catch(e){}
     b._fruit = { level: spawnLevel, radius: r, wobble: 0 };
     b._spawnTime = millis();
     World.add(world, b);
     bodies.push(b);
-    Body.setVelocity(b, { x: (Math.random()-0.5)*0.04, y: 0.28 + Math.random()*0.22 });
-    Body.setAngularVelocity(b, (Math.random()-0.5) * 0.005);
+    Body.setVelocity(b, { x: (Math.random()-0.5)*0.03, y: 0.26 + Math.random()*0.20 });
+    Body.setAngularVelocity(b, (Math.random()-0.5) * 0.004);
     clampSpinForFruit(b);
     spawnParticles(spawnX, spawnY + 2, spawnLevel, 8);
     clampBodyInsideBoard(b);
+
     return b;
   }
 
@@ -319,7 +330,7 @@
       const d = Vector.magnitude(Vector.sub(bodyA.position, bodyB.position));
       const minDist = (bodyA._fruit.radius + bodyB._fruit.radius) * MERGE_MIN_DIST;
       const relVel = Vector.magnitude(Vector.sub(bodyA.velocity, bodyB.velocity));
-      if(d <= minDist && relVel <= 2.8){
+      if(d <= minDist && relVel <= 3.0){
         tryMergePair(bodyA, bodyB);
       }
     }, delay);
@@ -362,7 +373,7 @@
       clampSpinForFruit(nb);
     }
 
-    spawnParticles(pos.x, pos.y, level, 24);
+    spawnParticles(pos.x, pos.y, level, 20);
     playPop(level);
     recordMergeForChain();
 
@@ -377,7 +388,7 @@
     if(!clearUnlocked && score >= CLEAR_UNLOCK_SCORE){ clearUnlocked = true; clearAvailable = true; updateClearDom(); }
     if(clearUnlocked && !clearAvailable && pointsAccumSinceClear >= CLEAR_RECHARGE_POINTS){ clearAvailable = true; pointsAccumSinceClear = 0; updateClearDom(); }
 
-    // Achievements: level 8 and final level 9 shoutouts
+    // Achievements
     if(level === 8){
       showAchievement('Almost there!', { subtitle: 'Level 8 reached', duration: 1900 });
     } else if(level === MAX_LEVEL){
@@ -400,7 +411,7 @@
     node.style.transform = 'translate(-50%,0)';
     node.style.padding = '6px 8px';
     node.style.borderRadius = '10px';
-    node.style.background = 'rgba(255,255,255,0.95)';
+    node.style.background = 'linear-gradient(90deg,#ff9b78,#ffd18c)';
     node.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
     node.style.fontWeight = '700';
     node.style.color = '#111';
@@ -466,12 +477,11 @@
     const img = document.createElement('img');
     img.alt = 'next fruit';
     img.src = `fruit${lvl}.png`;
-    img.style.width = '64px';
-    img.style.height = '64px';
+    img.style.width = '84px';
+    img.style.height = '84px';
     img.style.objectFit = 'contain';
     img.onerror = function(){ np.innerText = 'Lvl '+lvl; };
     np.appendChild(img);
-    // minimal styling fallback
     np.style.position = 'absolute';
     np.style.zIndex = 999;
   }
@@ -558,7 +568,7 @@
   }
 
   // -------------------------
-  // Achievements / Popups (inline styles)
+  // Achievements / Popups
   // -------------------------
   function showAchievement(title, opts = {}){
     const subtitle = opts.subtitle || '';
@@ -593,7 +603,7 @@
   }
 
   // -------------------------
-  // Merge flow UI, overlays
+  // Merge UI rendering helper (left panel)
   // -------------------------
   function renderMergeRingDom(){
     const container = el('mergeRing'); if(!container) return;
@@ -627,7 +637,16 @@
     container.appendChild(hint);
   }
 
-  function showStartOverlay(visible){ const ov = el('overlayStart'); if(!ov) return; ov.style.display = visible ? 'flex' : 'none'; }
+  // -------------------------
+  // Overlays & Game control
+  // -------------------------
+  function showStartOverlay(visible){ 
+    let ov = el('overlayStart'); 
+    if(!ov && visible) createLandingOverlay(); // create if missing
+    ov = el('overlayStart');
+    if(!ov) return;
+    ov.style.display = visible ? 'flex' : 'none'; 
+  }
   function closeStartOverlay(){ const ov = el('overlayStart'); if(ov) ov.style.display = 'none'; }
 
   function triggerGameOver(){
@@ -642,7 +661,7 @@
   function triggerFruitSupernova(){
     gameOver = true;
     isRunning = false;
-    for(let i=0;i<250;i++){ spawnParticles(Math.random()*width, Math.random()*height, Math.floor(Math.random()*MAX_LEVEL)+1, 1); }
+    for(let i=0;i<200;i++){ spawnParticles(Math.random()*width, Math.random()*height, Math.floor(Math.random()*MAX_LEVEL)+1, 1); }
     for(const b of bodies){ try{ World.remove(world, b); }catch(e){} }
     bodies = [];
     const ov = el('overlayGameOver'); if(ov){
@@ -667,7 +686,7 @@
   function setup(){
     const cnv = createCanvas(window.innerWidth, window.innerHeight);
     cnv.style('display','block');
-    pixelDensity(1); // avoid DPR scaling mismatch
+    pixelDensity(1);
     canvasElem = cnv.elt;
     if(canvasElem) canvasElem.style.touchAction = 'none';
 
@@ -736,6 +755,7 @@
     const sy = sx;
     for(const b of bodies){
       if(!b || !b.position) continue;
+      // reposition bodies so they scale with board
       const relX = b.position.x - oldRect.boardX;
       const relY = b.position.y - oldRect.boardY;
       const newX = newRect.boardX + relX * sx;
@@ -763,11 +783,11 @@
 
     const { boardW, boardX, boardY } = computeBoardRect();
 
-    // board back
+    // board background + border
     push(); noStroke(); fill(250,253,255); rect(boardX - 18, boardY - 18, boardW + 36, boardW + 36, 20);
-    stroke(210); strokeWeight(6); noFill(); rect(boardX - 14, boardY - 14, boardW + 28, boardW + 28, 18); pop();
+    stroke(205); strokeWeight(6); noFill(); rect(boardX - 14, boardY - 14, boardW + 28, boardW + 28, 18); pop();
 
-    // draw bodies sorted by y
+    // draw bodies sorted by y so overlap looks natural
     const drawBodies = bodies.slice().filter(b => b && b._fruit && b.position).sort((a,b)=> (a.position.y - b.position.y));
     noStroke();
     for(const b of drawBodies){
@@ -777,25 +797,26 @@
 
       push();
       drawingContext.shadowColor = "rgba(10,14,20,0.12)";
-      drawingContext.shadowBlur = 14;
+      drawingContext.shadowBlur = 12;
       fill(0,0,0,8);
-      ellipse(x + 2, y + r*0.15, r*1.28, r*0.56);
+      ellipse(x + 2, y + r*0.12, r*1.28, r*0.48);
       drawingContext.shadowBlur = 0;
       pop();
 
       const level = b._fruit.level;
+      // terminal glow for final fruit
       if(level === MAX_LEVEL){
         push();
         noFill();
         const glowSize = Math.min(r * 2.08, r * 2.6);
-        stroke(255, 215, 100, 120);
-        strokeWeight(Math.max(2, Math.round(r * 0.06)));
+        stroke(255, 210, 100, 120);
+        strokeWeight(Math.max(2, Math.round(r * 0.055)));
         ellipse(x, y, glowSize, glowSize);
         pop();
       }
 
       push();
-      translate(x, y); rotate(b.angle);
+      translate(x,y); rotate(b.angle);
       const wob = b._fruit.wobble || 0;
       scale(1 + wob*0.02, 1 - wob*0.02);
       const img = FRUIT_IMAGES[b._fruit.level];
@@ -816,7 +837,7 @@
 
     drawParticles();
 
-    // top dashed line
+    // top dashed line (game-over line)
     push();
     stroke(170); strokeWeight(1);
     const lineY = boardY + 8; const seg = 12;
@@ -825,6 +846,7 @@
 
     if(isRunning && !gameOver) drawShooterProjection(boardX, boardW, boardY);
 
+    // cleanup bodies that fell far away
     bodies = bodies.filter(b => {
       if(!b) return false;
       if(b.position.y > height + 900){
@@ -834,6 +856,7 @@
       return true;
     });
 
+    // supernova condition: too many terminal fruits (safety end)
     if(!gameOver){
       const terminalCount = bodies.reduce((acc, bb) => acc + ((bb && bb._fruit && bb._fruit.level === MAX_LEVEL) ? 1 : 0), 0);
       if(terminalCount >= 5){
@@ -841,7 +864,7 @@
       }
     }
 
-    // game over detection
+    // normal game over detection: fruit top crosses line
     if(!gameOver){
       const now = millis();
       const topLineY = boardY + 8;
@@ -853,6 +876,7 @@
           triggerGameOver();
           break;
         }
+        // also if fruit barely touching top and nearly static
         const speed = Math.sqrt((b.velocity.x||0)*(b.velocity.x||0) + (b.velocity.y||0)*(b.velocity.y||0));
         if(topOfFruit < topLineY + 8 && speed < 0.12){
           triggerGameOver();
@@ -868,6 +892,14 @@
   // -------------------------
   // Shooter projection
   // -------------------------
+  function clientToCanvasX(clientX){
+    if(!canvasElem) return clientX;
+    const rect = canvasElem.getBoundingClientRect();
+    // map client coordinate to canvas coordinate scale
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    return x;
+  }
+
   function drawShooterProjection(boardX, boardW, boardY){
     let px = mouseX;
     if(typeof touches !== 'undefined' && touches.length > 0 && touches[0] && typeof touches[0].x !== 'undefined'){
@@ -902,13 +934,6 @@
   // -------------------------
   // Input mapping
   // -------------------------
-  function clientToCanvasX(clientX){
-    if(!canvasElem) return clientX;
-    const rect = canvasElem.getBoundingClientRect();
-    const x = (clientX - rect.left) * (canvas.width / rect.width);
-    return x;
-  }
-
   function attemptSpawnAtScreenXFromClient(clientX){
     const cx = clientToCanvasX(clientX);
     attemptSpawnAtScreenX(cx);
@@ -948,6 +973,65 @@
   function clearAllFruits(){ for(const b of bodies){ try{ World.remove(world, b); }catch(e){} } bodies = []; }
 
   // -------------------------
+  // Landing overlay builder (if HTML missing)
+  // -------------------------
+  function createLandingOverlay(){
+    if(el('overlayStart')) return;
+    const ov = document.createElement('div'); ov.id = 'overlayStart';
+    ov.style.position = 'fixed'; ov.style.left = '0'; ov.style.top = '0'; ov.style.right = '0'; ov.style.bottom = '0';
+    ov.style.zIndex = '300'; ov.style.display = 'flex'; ov.style.alignItems = 'center'; ov.style.justifyContent = 'center';
+    ov.style.background = 'linear-gradient(180deg, rgba(8,12,18,0.48), rgba(8,12,18,0.48))';
+    ov.style.backdropFilter = 'blur(6px)';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.maxWidth = '720px';
+    card.style.width = '92%';
+    card.style.padding = '22px';
+    card.style.textAlign = 'left';
+
+    const h = document.createElement('div'); h.className = 'title'; h.innerText = 'Suika - Physics Prototype';
+    h.style.fontSize = '28px'; h.style.marginBottom = '6px';
+    const sub = document.createElement('div'); sub.className = 'subtitle'; sub.innerText = 'Merge fruits by dropping them into the box. Merge two identical fruits to make the next level.';
+    sub.style.marginBottom = '12px';
+
+    const tutorial = document.createElement('ol');
+    tutorial.style.fontSize = '15px';
+    tutorial.style.lineHeight = '1.5';
+    tutorial.innerHTML = '<li>Tap / click inside the box to drop a fruit.</li><li>Merge two identical fruits to create a higher-level fruit.</li><li>Use "Clear Small" once it unlocks to remove level 1-2 fruits when recharging.</li>';
+
+    const startBtn = document.createElement('button');
+    startBtn.id = 'startBtn';
+    startBtn.className = 'bigBtn';
+    startBtn.style.marginTop = '14px';
+    startBtn.innerText = 'Start Game';
+    startBtn.onclick = () => { closeStartOverlay(); startGame(); };
+
+    const tips = document.createElement('div');
+    tips.className = 'tip';
+    tips.style.marginTop = '10px';
+    tips.innerText = 'Tip: The preview at the top-right shows the next fruit. Try to plan merges!';
+
+    card.appendChild(h); card.appendChild(sub); card.appendChild(tutorial); card.appendChild(startBtn); card.appendChild(tips);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    // also create overlayGameOver if not present (simple)
+    if(!el('overlayGameOver')){
+      const og = document.createElement('div'); og.id = 'overlayGameOver';
+      og.style.position = 'fixed'; og.style.left='0'; og.style.top='0'; og.style.right='0'; og.style.bottom='0';
+      og.style.zIndex='350'; og.style.display='none'; og.style.alignItems='center'; og.style.justifyContent='center';
+      og.style.background='linear-gradient(180deg, rgba(8,12,18,0.48), rgba(8,12,18,0.48))';
+      const cardg = document.createElement('div'); cardg.className='card';
+      const gh = document.createElement('div'); gh.className='title'; gh.innerText='Game Over';
+      const gs = document.createElement('div'); gs.id='gameOverScore'; gs.style.marginTop='10px'; gs.innerText='Score 0';
+      const restartBtn = document.createElement('button'); restartBtn.id='restartBtn'; restartBtn.className='bigBtn'; restartBtn.style.marginTop='12px'; restartBtn.innerText='Play Again';
+      restartBtn.onclick = () => { closeGameOver(); startGame(); };
+      cardg.appendChild(gh); cardg.appendChild(gs); cardg.appendChild(restartBtn); og.appendChild(cardg);
+      document.body.appendChild(og);
+    }
+  }
+
+  // -------------------------
   // Expose hooks
   // -------------------------
   window.preload = preload;
@@ -958,4 +1042,8 @@
   window.touchStarted = touchStarted;
   window.keyPressed = keyPressed;
 
+  // create landing overlay immediately if HTML missing
+  if(typeof window !== 'undefined'){
+    window.addEventListener('load', ()=>{ setTimeout(()=>{ if(!el('overlayStart')) createLandingOverlay(); }, 18); });
+  }
 })();
