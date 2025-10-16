@@ -25,17 +25,17 @@
   // Level 1 radius fraction of boardW; everything scales with boardW for responsive layout
   const RADIUS_BASE_FRAC = 0.02; // level1 radius = 5% of boardW
   const RADIUS_GROWTH = 1.45;    // per-level growth multiplier
-  const MAX_RADIUS_FRAC = 0.34;  // clamp so fruit never bigger than this fraction of boardW
+  const MAX_RADIUS_FRAC = 0.33;  // clamp so fruit never bigger than this fraction of boardW
 
   // Merge and collision tuning
-  const MERGE_MIN_DIST = 1.4; // use sum of radii * this -> nearly exact contact for merge checks
+  const MERGE_MIN_DIST = 1; // use sum of radii * this -> nearly exact contact for merge checks
   const SPAWN_DEBOUNCE = 200;
   const SPAWN_GRACE_MS = 900;
   const CLEAR_UNLOCK_SCORE = 500;
   const CLEAR_RECHARGE_POINTS = 300;
 
   // Visual draw scaling (draw radius = r * 2 * VISUAL_DIAMETER_FACTOR)
-  const VISUAL_DIAMETER_FACTOR = 1.02;
+  const VISUAL_DIAMETER_FACTOR = 1.2;
 
   // Scoring: Suika-ish table (tight)
   // index = level, value = points for merging into this level
